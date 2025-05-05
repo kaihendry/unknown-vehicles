@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <title>Days of {{ .Month.Format "January 2006" }}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:,">
+
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 1rem;
+            color: #333;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        align-items: center;
+        }
+
+        h2 {
+            color: #4a7c59;
+            margin: 1rem 0;
+            font-size: 1.2rem;
+        }
+
+        p {
+            margin: 0.25rem 0;
+            font-size: 1rem;
+            text-align: left;
+        }
+
+        p strong {
+            font-weight: bold;
+            color: #d35400;
+            /* A distinct color for the current day */
+        }
+
+        form {
+            margin-bottom: 1rem;
+        }
+
+        input[type="month"] {
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 0.25rem;
+            font-size: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        pre {
+            white-space: pre;
+            word-break: normal;
+            font-family: inherit;
+            line-height: 1.5;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            align-items: center;
+        }
+
+        main {
+            min-width: 300px;
+            width: 100%;
+            max-width: 600px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        td {
+            padding: 2px 0;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        td.date {
+            white-space: nowrap;
+        }
+
+        /* Reset table and row styling to default */
+        tr {
+            display: table-row;
+        }
+
+        td {
+            display: table-cell;
+        }
+        
+        a {
+            color: #2a5db0;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+        
+        .holiday {
+            color: #e67e22;
+            font-weight: 600;
+            background-color: #fff3e0;
+            padding: 2px 8px;
+            border-radius: 4px;
+            display: inline-block;
+            font-size: 0.95rem;
+            border: 1px solid #ffd8a8;
+            margin-left: 4px;
+        }
+
+        /* Visually hidden elements - visible for screen readers and copying */
+        .visually-hidden {
+            clip: rect(1px, 1px, 1px, 1px);
+            height: 1px;
+            width: 1px;
+            overflow: hidden;
+            position: absolute;
+            white-space: pre;
+        }
+
+        @media (max-width: 480px) {
+            table {
+                table-layout: fixed;
+                width: 100%;
+            }
+            
+            td.date {
+                margin-bottom: 2px;
+            }
+            
+            .holiday {
+                display: inline-block;
+                word-break: break-word;
+                max-width: 100%;
+                margin-left: 4px;
+            }
+        }
+
+    </style>
+</head>
+
+<body>
+<nav>
+<form id="monthForm">
+    <!-- Previous Button -->
+    <button type="button" onclick="updateMonth('{{ .Previous.Format "2006-01" }}')">Previous</button>
+
+    <!-- Month Picker -->
+    <input type="month" value='{{ .Month.Format "2006-01" }}' name="month" onchange="this.form.submit()">
+
+    <!-- Next Button -->
+    <button type="button" onclick="updateMonth('{{ .Next.Format "2006-01" }}')">Next</button>
+
+    <!-- ICS Hidden Field -->
+    {{ if .IcsURL }}
+    <input type="hidden" name="ics" value="{{ .IcsURL }}">
+    {{ end }}
+</form>
+</nav>
+<script>
+function updateMonth(newMonth) {
+    // Set the value of the month input to the newMonth
+    document.querySelector('input[name="month"]').value = newMonth;
+    // Submit the form
+    document.getElementById('monthForm').submit();
+}
+</script>
+<main>
+    {{- $previousWeek := -1 }}{{/* Initialize a variable to track the previous week number */}}
+    <table>
+    {{range $day := .Days -}}
+    {{- $currentWeek := $day.Date | weekNumber }}{{/* Get the current week number */}}
+    {{- if ne $currentWeek $previousWeek }}{{/* Compare with the previous week number */}}
+    <tr><td colspan="2"><h2>Week Number: {{$currentWeek}}</h2></td></tr>{{/* Print the week number if it's different */}}
+    {{- $previousWeek = $currentWeek }}{{/* Update the previous week number */}}
+    {{- end }}
+    <tr>
+    {{- if eq ($day.Date.Format "2006-01-02") ($.Now.Format "2006-01-02") }}
+        <td class="date"><strong>{{$day.Date.Format "2006-01-02 Mon"}}</strong></td>
+    {{- else }}
+        <td class="date">{{$day.Date.Format "2006-01-02 Mon"}}</td>
+    {{- end }}
+    {{- if $day.IsHoliday}}
+        <td><span class="visually-hidden"> - </span><span class="holiday">{{$day.HolidaySummary}}</span></td>
+    {{- else }}
+        <td></td>
+    {{- end }}
+    </tr>
+    {{- end }}
+    </table>
+    </main>
+
+    <br>
+    <p><a href="https://github.com/kaihendry/days/commit/{{ .Version }}">Source code</a></p>
+</body>
+
+</html>
+

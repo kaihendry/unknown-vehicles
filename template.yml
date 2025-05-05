@@ -1,0 +1,51 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  DomainName:
+    Type: String
+  ACMCertificateArn:
+    Type: String
+
+Resources:
+  # Create log group for Access logs
+  AccessLogGroup:
+    Type: "AWS::Logs::LogGroup"
+    Properties:
+      RetentionInDays: 30
+      LogGroupName: !Ref DomainName
+
+  Gateway:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      Domain:
+        DomainName: !Ref DomainName
+        CertificateArn: !Ref ACMCertificateArn
+
+  MainFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Architectures:
+        - arm64
+      CodeUri: .
+      Handler: main
+      Runtime: provided.al2
+      Events:
+        CatchAll:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Gateway
+            Path: /{proxy+}
+            Method: ANY
+    Metadata:
+      BuildMethod: makefile
+
+Globals:
+  Function:
+    LoggingConfig:
+      LogFormat: JSON
+
+Outputs:
+  CNAME:
+    Description: The regional domain name for CNAME value
+    Value: !GetAtt [Gateway.DomainName, RegionalDomainName]
