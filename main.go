@@ -1,136 +1,78 @@
 package main
 
 import (
-	"embed"
 	"fmt"
-	"html/template"
-	"io"
+	"io" // Import io package
+	"log"
 	"log/slog"
 	"net/http"
 	"os"
 	"runtime/debug"
-	"strings"
-	"time"
 
 	"github.com/apex/gateway/v2"
-	ics "github.com/arran4/golang-ical"
+	"github.com/gregdel/pushover"
 )
 
-//go:embed templates
-var tmpl embed.FS
-
-type day struct {
-	Date           time.Time
-	IsHoliday      bool
-	HolidaySummary string
-}
-
-func days(month time.Time) (days []day) {
-	firstDay := time.Date(month.Year(), month.Month(), 1, 0, 0, 0, 0, time.UTC)
-	monthEnd := firstDay.AddDate(0, 1, -1) // add a month, minus a day
-	slog.Debug("last day", "monthEnd", monthEnd)
-	for i := 0; i < monthEnd.Day(); i++ {
-		days = append(days, day{Date: firstDay.AddDate(0, 0, i)})
-	}
-	slog.Debug("days of a month", "month", month, "days", days)
-	return days
-}
-
-func getWeekNumber(t time.Time) int {
-	_, week := t.ISOWeek()
-	return week
-}
-
 func main() {
+	// Read Pushover credentials from environment variables
+	pushoverToken := os.Getenv("PUSHOVER_TOKEN")
+	pushoverUserKey := os.Getenv("PUSHOVER_USER_KEY")
 
-	commit, _ := GitCommit()
-
-	t, err := template.New("base").Funcs(template.FuncMap{"weekNumber": getWeekNumber}).ParseFS(tmpl, "templates/*.html")
-	if err != nil {
-		slog.Error("Failed to parse templates", "error", err)
-		return
+	if pushoverToken == "" || pushoverUserKey == "" {
+		log.Fatal("PUSHOVER_TOKEN and PUSHOVER_USER_KEY environment variables must be set")
 	}
 
-	http.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
-		chosenDate := time.Now()
-		inputMonth := r.URL.Query().Get("month")
-		if inputMonth != "" {
-			chosenDate, err = time.Parse("2006-01", r.URL.Query().Get("month"))
-			if err != nil {
-				chosenDate = time.Now()
-				slog.Warn("bad input, defaulting to current month", "month", chosenDate.Format("2006-01"))
-			}
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		// only respond to post requests
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
 		}
-		days := days(chosenDate)
-
-		icsURL := r.URL.Query().Get("ics")
-		// check icsURL is indeed a URL
-		if icsURL != "" {
-			// get ics file
-			icsData, err := fetch(icsURL)
-			if err != nil {
-				http.Error(rw, err.Error(), http.StatusInternalServerError)
-				slog.Error("Failed to fetch ics", "error", err)
-				return
-			}
-			cal, err := ics.ParseCalendar(strings.NewReader(icsData))
-			if err != nil {
-				http.Error(rw, err.Error(), http.StatusInternalServerError)
-				slog.Error("Failed to parse ics", "error", err)
-				return
-			}
-			holidays, err := findHolidays(cal)
-			if err != nil {
-				http.Error(rw, err.Error(), http.StatusInternalServerError)
-				slog.Error("Failed to find holidays", "error", err)
-				return
-			}
-			for i, d := range days {
-				for _, h := range holidays {
-					start, err := h.GetDtStampTime()
-					if err != nil {
-						http.Error(rw, err.Error(), http.StatusInternalServerError)
-						slog.Error("Failed to get start time", "error", err)
-						return
-					}
-					end, err := h.GetEndAt()
-					if err != nil {
-						http.Error(rw, err.Error(), http.StatusInternalServerError)
-						slog.Error("Failed to get end time", "error", err)
-						return
-					}
-					if (d.Date.After(start) || d.Date.Equal(start)) && (d.Date.Before(end) || d.Date.Equal(end)) {
-						days[i].IsHoliday = true
-						days[i].HolidaySummary = h.GetProperty(ics.ComponentPropertySummary).Value
-					}
-				}
-			}
+		build, ok := debug.ReadBuildInfo()
+		if !ok {
+			http.Error(w, "No build info available", http.StatusInternalServerError)
+			return
 		}
+		w.Header().Set("X-Version", build.Main.Version)
 
-		rw.Header().Set("Content-Type", "text/html")
-		err = t.ExecuteTemplate(rw, "index.html", struct {
-			Now      time.Time
-			Month    time.Time
-			Previous time.Time
-			Next     time.Time
-			Days     []day
-			Version  string
-			IcsURL   string
-		}{
-			time.Now(),
-			chosenDate,
-			chosenDate.AddDate(0, -1, 0),
-			chosenDate.AddDate(0, 1, 0),
-			days,
-			commit,
-			icsURL})
+		// Create a new pushover app with the token from env var
+		app := pushover.New(pushoverToken)
+
+		// Create a new recipient with the user key from env var
+		recipient := pushover.NewRecipient(pushoverUserKey)
+
+		// Read HTTP POST request body
+		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
-			http.Error(rw, err.Error(), http.StatusInternalServerError)
-			slog.Error("Failed to execute templates", "error", err)
+			slog.Error("error reading request body", "error", err)
+			http.Error(w, "Error reading request body", http.StatusBadRequest)
+			return
+		}
+		defer r.Body.Close()
+
+		// Create a new message with the body content
+		message := pushover.NewMessage(string(bodyBytes))
+
+		// Send the message to the recipient
+		response, err := app.SendMessage(message, recipient)
+		if err != nil {
+			slog.Error("error sending pushover message", "error", err)
+			http.Error(w, "Error sending notification", http.StatusInternalServerError)
+			return
+		}
+
+		// Print the response if you want
+		log.Println(response)
+
+		_, err = w.Write([]byte("Notification sent. Version: " + build.Main.Version)) // Updated response
+		if err != nil {
+			slog.Error("error writing response", "error", err)
 		}
 	})
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+
+	var err error
 
 	if _, ok := os.LookupEnv("AWS_LAMBDA_FUNCTION_NAME"); ok {
 		err = gateway.ListenAndServe("", nil)
@@ -139,64 +81,4 @@ func main() {
 		err = http.ListenAndServe(fmt.Sprintf(":%s", os.Getenv("PORT")), nil)
 	}
 	slog.Error("error listening", "error", err)
-}
-
-func GitCommit() (commit string, dirty bool) {
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
-		return "", false
-	}
-	for _, setting := range bi.Settings {
-		switch setting.Key {
-		case "vcs.modified":
-			dirty = setting.Value == "true"
-		case "vcs.revision":
-			commit = setting.Value
-		}
-	}
-	return
-}
-
-func findHolidays(cal *ics.Calendar) (holidays []ics.VEvent, err error) {
-	for _, event := range cal.Events() {
-		start, err := event.GetDtStampTime()
-		if err != nil {
-			return nil, err
-		}
-		end, err := event.GetEndAt()
-		if err != nil {
-			return nil, err
-		}
-		// if duration is above a day, it's a holiday
-		if end.Sub(start).Hours()/24 > 1 {
-			holidays = append(holidays, *event)
-		}
-	}
-	return holidays, nil
-}
-
-func fetch(url string) (string, error) {
-	c := http.Client{Timeout: 1 * time.Second}
-
-	slog.Debug("http get", "url", url)
-	resp, err := c.Get(url)
-	if err != nil {
-		return "", err
-	}
-	defer func() {
-		err := resp.Body.Close()
-		if err != nil {
-			slog.Error("failed to close response body", "error", err)
-		}
-	}()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to download %s: %s", url, resp.Status)
-	}
-
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	return string(data), nil
 }

@@ -1,12 +1,5 @@
-# Prints days with week day for planning
+# Unknown vehicle logging
 
-Just an excuse for me to try [HTTP API
-gateway](https://aws.amazon.com/api-gateway/pricing/#HTTP_APIs) with an AWS
-serverless function.
+Protect Web hook with secret key header X-PASSWORD
 
-Video about it https://youtu.be/p9pxbDb006I
-
-
-# DNS configuration
-
-<img src="https://s.natalian.org/2021-10-09/domain-details.png">
+![Configure Web hook](image.png)

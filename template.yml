@@ -2,10 +2,12 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
 Parameters:
-  DomainName:
+  PushoverToken: # Renamed from PushoverApiKey for clarity
     Type: String
-  ACMCertificateArn:
+    Description: Pushover Application API Token
+  PushoverUserKey:
     Type: String
+    Description: Pushover User Key
 
 Resources:
   # Create log group for Access logs
@@ -13,14 +15,9 @@ Resources:
     Type: "AWS::Logs::LogGroup"
     Properties:
       RetentionInDays: 30
-      LogGroupName: !Ref DomainName
 
   Gateway:
     Type: AWS::Serverless::HttpApi
-    Properties:
-      Domain:
-        DomainName: !Ref DomainName
-        CertificateArn: !Ref ACMCertificateArn
 
   MainFunction:
     Type: AWS::Serverless::Function
@@ -30,6 +27,10 @@ Resources:
       CodeUri: .
       Handler: main
       Runtime: provided.al2
+      Environment: # Add Environment variables
+        Variables:
+          PUSHOVER_TOKEN: !Ref PushoverToken
+          PUSHOVER_USER_KEY: !Ref PushoverUserKey
       Events:
         CatchAll:
           Type: HttpApi
@@ -46,6 +47,6 @@ Globals:
       LogFormat: JSON
 
 Outputs:
-  CNAME:
-    Description: The regional domain name for CNAME value
-    Value: !GetAtt [Gateway.DomainName, RegionalDomainName]
+  APIGatewayUrl:
+    Description: "API Gateway URL"
+    Value: !Sub "https://${Gateway}.execute-api.${AWS::Region}.amazonaws.com/Prod/"

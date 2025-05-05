@@ -2,6 +2,11 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+
+env:
+  CLOUDFLARE_ACCOUNT_ID: "212aab16e8e2f88974a456b8097b2726"
+  CLOUDFLARE_ZONE_ID: "dabase.com"
+
 permissions:
   id-token: write
   contents: read
