@@ -8,6 +8,10 @@ Parameters:
   PushoverUserKey:
     Type: String
     Description: Pushover User Key
+  Version:
+    Type: String
+    Default: "unknown"
+    Description: Version of the application
 
 Resources:
   # Create log group for Access logs
@@ -31,6 +35,7 @@ Resources:
         Variables:
           PUSHOVER_TOKEN: !Ref PushoverToken
           PUSHOVER_USER_KEY: !Ref PushoverUserKey
+          VERSION: !Ref Version
       Events:
         CatchAll:
           Type: HttpApi

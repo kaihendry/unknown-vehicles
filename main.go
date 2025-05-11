@@ -8,15 +8,12 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"runtime/debug"
 	"time"
 
 	"github.com/apex/gateway/v2"
 	"github.com/aws/aws-lambda-go/lambdacontext" // Import for Lambda context
 	"github.com/gregdel/pushover"
 )
-
-var gitCommit string // Added to store the git commit hash
 
 // contextKey is a custom type for context keys to avoid collisions.
 type contextKey string
@@ -118,19 +115,9 @@ func createMainHandler(pushoverClient PushoverClient, pushoverUserKey string) ht
 			return
 		}
 
-		// Use gitCommit for version information
-		if gitCommit == "" {
-			// Fallback or error if gitCommit is not set, though ldflags should set it.
-			// For now, we can try to read build info as a fallback, but ideally gitCommit is always present.
-			build, ok := debug.ReadBuildInfo()
-			if ok {
-				w.Header().Set("X-Version", build.Main.Version) // Fallback to build info if gitCommit is empty
-			} else {
-				w.Header().Set("X-Version", "unknown")
-			}
-		} else {
-			w.Header().Set("X-Version", gitCommit)
-		}
+		// Use VERSION environment variable for version information
+		version := os.Getenv("VERSION")
+		w.Header().Set("X-Version", version)
 
 		// Create a new recipient with the user key from env var
 		recipient := pushover.NewRecipient(pushoverUserKey)
@@ -177,25 +164,37 @@ func main() {
 		log.Fatal("PUSHOVER_TOKEN and PUSHOVER_USER_KEY environment variables must be set")
 	}
 
+	appVersion := os.Getenv("VERSION") // Get application version
+
 	// Create a pushover client
 	pushoverClient := NewDefaultPushoverClient(pushoverToken)
 
 	// Set up the handler for the main endpoint
 	mainHandler := createMainHandler(pushoverClient, pushoverUserKey)
 
-	// Set up default logger
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	// Configure logger with version based on environment
+	var baseHandler slog.Handler
+	isLambda := false
+	if _, ok := os.LookupEnv("AWS_LAMBDA_FUNCTION_NAME"); ok {
+		isLambda = true
+		baseHandler = slog.NewJSONHandler(os.Stdout, nil)
+	} else {
+		baseHandler = slog.NewTextHandler(os.Stdout, nil)
+	}
+
+	// Create logger with version attribute
+	loggerWithVersion := slog.New(baseHandler.WithAttrs([]slog.Attr{slog.String("version", appVersion)}))
+	slog.SetDefault(loggerWithVersion) // Set this as the default logger
 
 	// Apply middleware to the main handler
 	http.Handle("/", loggingMiddleware(mainHandler))
 
 	var err error
 
-	if _, ok := os.LookupEnv("AWS_LAMBDA_FUNCTION_NAME"); ok {
+	if isLambda {
 		slog.Info("starting in AWS Lambda mode")
 		err = gateway.ListenAndServe("", nil)
 	} else {
-		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, nil)))
 		port := os.Getenv("PORT")
 		if port == "" {
 			port = "8080" // Default port if not specified
