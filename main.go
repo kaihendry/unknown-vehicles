@@ -132,7 +132,12 @@ func createMainHandler(pushoverClient PushoverClient, pushoverUserKey string) ht
 			http.Error(w, "Error reading request body", http.StatusBadRequest)
 			return
 		}
-		defer r.Body.Close()
+		defer func() {
+			err := r.Body.Close()
+			if err != nil {
+				logger.Error("failed closing request body", "error", err)
+			}
+		}()
 
 		// Log the request payload
 		logger.Info("received POST payload", "content_length", len(bodyBytes), "payload", string(bodyBytes))
