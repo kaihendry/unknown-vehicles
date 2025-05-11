@@ -34,6 +34,9 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		start := time.Now()
 		requestID := getRequestID(r.Context())
 
+		// Add requestID to response header
+		w.Header().Set("X-Request-ID", requestID)
+
 		// Create a logger with requestId pre-configured
 		logger := slog.Default().With("requestId", requestID)
 
