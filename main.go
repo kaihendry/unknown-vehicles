@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context" // Import context package
 	"fmt"
 	"io" // Import io package
 	"log"
@@ -11,18 +12,40 @@ import (
 	"time"
 
 	"github.com/apex/gateway/v2"
+	"github.com/aws/aws-lambda-go/lambdacontext" // Import for Lambda context
 	"github.com/gregdel/pushover"
 )
 
 var gitCommit string // Added to store the git commit hash
 
-// loggingMiddleware logs request details including method, path, user agent, and duration
+// contextKey is a custom type for context keys to avoid collisions.
+type contextKey string
+
+const loggerContextKey = contextKey("logger")
+
+// getLoggerFromContext retrieves the logger from context or returns the default logger.
+func getLoggerFromContext(ctx context.Context) *slog.Logger {
+	if logger, ok := ctx.Value(loggerContextKey).(*slog.Logger); ok {
+		return logger
+	}
+	return slog.Default() // Fallback to default logger
+}
+
+// loggingMiddleware logs request details and injects a logger with requestId into the context.
 func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		requestID := getRequestID(r.Context())
 
-		// Log basic request information
-		slog.Info("request started",
+		// Create a logger with requestId pre-configured
+		logger := slog.Default().With("requestId", requestID)
+
+		// Store logger in context
+		ctx := context.WithValue(r.Context(), loggerContextKey, logger)
+		r = r.WithContext(ctx)
+
+		// Log basic request information using the new logger
+		logger.Info("request started",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"remote_addr", r.RemoteAddr,
@@ -32,14 +55,32 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		// Call the next handler
 		next.ServeHTTP(w, r)
 
-		// Log request duration
+		// Log request duration using the new logger
 		duration := time.Since(start)
-		slog.Info("request completed",
+		logger.Info("request completed",
 			"method", r.Method,
 			"path", r.URL.Path,
 			"duration_ms", duration.Milliseconds(),
 		)
 	})
+}
+
+// getRequestID extracts the AWS Lambda request ID from the context if available, falling back to APIGateway request ID.
+func getRequestID(ctx context.Context) string {
+	// Try to get the Lambda invocation ID first
+	if lc, ok := lambdacontext.FromContext(ctx); ok {
+		if lc.AwsRequestID != "" {
+			return lc.AwsRequestID
+		}
+	}
+
+	// Fallback to API Gateway request ID provided by apex/gateway
+	if lambdaCtx, ok := gateway.RequestContext(ctx); ok {
+		return lambdaCtx.RequestID
+	}
+
+	// If neither is found, return an empty string or a custom placeholder
+	return "" // Return empty if not found
 }
 
 // PushoverClient defines the interface for sending push notifications
@@ -68,9 +109,11 @@ func (c *DefaultPushoverClient) SendMessage(message *pushover.Message, recipient
 // with Pushover integration
 func createMainHandler(pushoverClient PushoverClient, pushoverUserKey string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		logger := getLoggerFromContext(r.Context()) // Retrieve logger from context
+
 		// only respond to post requests
 		if r.Method != http.MethodPost {
-			slog.Info("method not allowed", "method", r.Method)
+			logger.Info("method not allowed", "method", r.Method)
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
@@ -95,14 +138,14 @@ func createMainHandler(pushoverClient PushoverClient, pushoverUserKey string) ht
 		// Read HTTP POST request body
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
-			slog.Error("failed reading request body", "error", err)
+			logger.Error("failed reading request body", "error", err)
 			http.Error(w, "Error reading request body", http.StatusBadRequest)
 			return
 		}
 		defer r.Body.Close()
 
 		// Log the request payload
-		slog.Info("received POST payload", "content_length", len(bodyBytes), "payload", string(bodyBytes))
+		logger.Info("received POST payload", "content_length", len(bodyBytes), "payload", string(bodyBytes))
 
 		// Create a new message with the body content
 		message := pushover.NewMessage(string(bodyBytes))
@@ -110,28 +153,17 @@ func createMainHandler(pushoverClient PushoverClient, pushoverUserKey string) ht
 		// Send the message to the recipient
 		response, err := pushoverClient.SendMessage(message, recipient)
 		if err != nil {
-			slog.Error("failed sending pushover message", "error", err)
+			logger.Error("failed sending pushover message", "error", err)
 			http.Error(w, "Error sending notification", http.StatusInternalServerError)
 			return
 		}
 
 		// Log successful push notification
-		slog.Info("pushover notification sent", "status", response.Status, "response_id", response.ID)
+		logger.Info("pushover notification sent", "status", response.Status, "response_id", response.ID)
 
-		versionInfo := gitCommit
-		if versionInfo == "" {
-			// Fallback for version info in response body
-			build, ok := debug.ReadBuildInfo()
-			if ok {
-				versionInfo = build.Main.Version
-			} else {
-				versionInfo = "unknown"
-			}
-		}
-
-		_, err = w.Write([]byte("Notification sent.")) // Updated response
+		_, err = w.Write([]byte("Notification sent.\n")) // Updated response
 		if err != nil {
-			slog.Error("writing response", "error", err)
+			logger.Error("writing response", "error", err)
 		}
 	}
 }

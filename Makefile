@@ -27,8 +27,20 @@ test:
 	-d '{"type": "motion", "camera": "Front Door Cam", "timestamp": "2023-10-27T10:00:00Z", "message": "Motion detected at the front door"}' \
 	http://localhost:3000/
 
-sam-tail-logs:
+tail:
 	sam logs --stack-name $(STACK) --tail
+
+logs:
+	sam logs --stack-name $(STACK)
+
+list:
+	sam list endpoints --stack-name $(STACK)
+
+traces:
+	sam traces --stack-name $(STACK)
+
+sync:
+	sam sync --stack-name $(STACK)
 
 clean:
 	rm -rf main gin-bin
