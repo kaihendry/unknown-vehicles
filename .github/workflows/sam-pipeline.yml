@@ -19,6 +19,7 @@ jobs:
         with:
           go-version: "stable"
           check-latest: true
+      - run: go test ./...
       - uses: aws-actions/setup-sam@v2
         with:
           use-installer: true

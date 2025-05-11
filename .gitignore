@@ -1,1 +1,4 @@
 .envrc
+.aws-sam
+protect
+tmp/
